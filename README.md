@@ -182,4 +182,4 @@ AI agent 자체가 문제가 있다기보다는 인간이 AI agent의 결과물�
 
 ## How to Reproduce my result
 
-just run `python3 definitive_proof.py`
+just run `python3 definitive_proof.py` and `python3 view_saved_weights.py`
