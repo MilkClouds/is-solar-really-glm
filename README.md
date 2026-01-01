@@ -34,6 +34,7 @@ AI agent 자체가 문제가 있다기보다는 인간이 AI agent의 결과물�
 
 ### A.
 
+```
 • AGENTS.md는 이 리포에서 찾지 못했어요. 대신 요청하신 0.37(동일 모델 다른 레이어) cosine 계산
   코드는 definitive_proof.py에 있습니다.
 
@@ -72,7 +73,7 @@ AI agent 자체가 문제가 있다기보다는 인간이 AI agent의 결과물�
 
   원하시면 이 계산이 어디서 호출되는지(실행 진입점)나, 다른 스크립트에서 동일 결과를 재현하는
   경로도 정리해 드릴게요.
-
+```
 
 ## How to Reproduce my result
 
