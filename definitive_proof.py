@@ -95,6 +95,29 @@ def load_index(repo: str, rev: str, token: Optional[str]) -> Dict[str, str]:
     with open(path) as f:
         return json.load(f)["weight_map"]
 
+def save_selected_weights(
+    repo_name: str,
+    wm: Dict[str, str],
+    layers: List[int],
+    get_header_fn,
+    token: Optional[str],
+    out_dir: str,
+) -> None:
+    os.makedirs(out_dir, exist_ok=True)
+    for layer in layers:
+        key = f"model.layers.{layer}.input_layernorm.weight"
+        if key not in wm:
+            continue
+        try:
+            hdr = get_header_fn(repo_name, wm[key])
+            raw = fetch_raw_bytes(hdr["__url__"], hdr, key, token)
+            arr = decode_tensor(raw, hdr[key]["dtype"])
+            fname = f"{repo_name.replace('/', '__')}_layer{layer}_input_layernorm.npy"
+            path = os.path.join(out_dir, fname)
+            np.save(path, arr)
+        except Exception as e:
+            eprint(f"  [save-skip] {repo_name} {key}: {e}")
+
 def main():
     token = os.environ.get("HF_TOKEN")
     rev = "main"
@@ -196,6 +219,10 @@ def main():
 
     # Within GLM: Compare layer 0 vs other layers
     base_layers = [0, 10, 20, 30, 40]
+    print("\nSaving selected LayerNorm weights...")
+    save_selected_weights(GLM, glm_wm, base_layers, get_header, token, "saved_weights")
+    save_selected_weights(SOLAR, solar_wm, base_layers, get_header, token, "saved_weights")
+
     for layer_j in base_layers[1:]:
         key_i = "model.layers.0.input_layernorm.weight"
         key_j = f"model.layers.{layer_j}.input_layernorm.weight"
@@ -206,6 +233,11 @@ def main():
 
             glm_hdr_i = get_header(GLM, glm_shard_i)
             glm_hdr_j = get_header(GLM, glm_shard_j)
+
+            shape_i = glm_hdr_i[key_i]["shape"]
+            shape_j = glm_hdr_j[key_j]["shape"]
+            print(f"  GLM[{0}] {key_i} shape={shape_i} dtype={glm_hdr_i[key_i]['dtype']}")
+            print(f"  GLM[{layer_j}] {key_j} shape={shape_j} dtype={glm_hdr_j[key_j]['dtype']}")
 
             raw_i = fetch_raw_bytes(glm_hdr_i["__url__"], glm_hdr_i, key_i, token)
             raw_j = fetch_raw_bytes(glm_hdr_j["__url__"], glm_hdr_j, key_j, token)
@@ -233,6 +265,10 @@ def main():
             try:
                 glm_hdr_i = get_header(GLM, glm_wm[key_i])
                 glm_hdr_j = get_header(GLM, glm_wm[key_j])
+                shape_i = glm_hdr_i[key_i]["shape"]
+                shape_j = glm_hdr_j[key_j]["shape"]
+                print(f"  GLM[{layer_i}] {key_i} shape={shape_i} dtype={glm_hdr_i[key_i]['dtype']}")
+                print(f"  GLM[{layer_j}] {key_j} shape={shape_j} dtype={glm_hdr_j[key_j]['dtype']}")
                 raw_i = fetch_raw_bytes(glm_hdr_i["__url__"], glm_hdr_i, key_i, token)
                 raw_j = fetch_raw_bytes(glm_hdr_j["__url__"], glm_hdr_j, key_j, token)
                 arr_i = decode_tensor(raw_i, glm_hdr_i[key_i]["dtype"])
@@ -277,6 +313,11 @@ def main():
 
             solar_hdr = get_header(SOLAR, solar_shard)
             glm_hdr = get_header(GLM, glm_shard)
+
+            s_shape = solar_hdr[key]["shape"]
+            g_shape = glm_hdr[key]["shape"]
+            print(f"  Solar[{layer}] {key} shape={s_shape} dtype={solar_hdr[key]['dtype']}")
+            print(f"  GLM[{layer}] {key} shape={g_shape} dtype={glm_hdr[key]['dtype']}")
 
             solar_raw = fetch_raw_bytes(solar_hdr["__url__"], solar_hdr, key, token)
             glm_raw = fetch_raw_bytes(glm_hdr["__url__"], glm_hdr, key, token)
