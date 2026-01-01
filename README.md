@@ -1,297 +1,79 @@
 # Solar-Open-100B vs GLM-4.5-Air: 가중치 파생 분석
 
-## 최종 결론: Solar-Open-100B는 GLM-4.5-Air에서 파생되었습니다
+## 최종 결론: [Solar-Open-100B는 GLM-4.5-Air에서 파생되었다는 주장](https://github.com/sionic-ai/solar-vs-glm)의 근거는 충분하지 않습니다.
 
-**증거 강도: 결정적 (182 시그마)**
+[solar-vs-glm](https://github.com/sionic-ai/solar-vs-glm)의 핵심 근거는 같은 모델 내에서 서로 다른 레이어끼리 구한 cosine sim(0.377)보다 solar[i]-glm[i]의 cosine sim(0.989)보다 월등히 크다는 사실입니다.
 
----
-
-## 결정적 증거
-
-![Definitive Evidence](results/definitive_evidence.png)
-
-### Within-Model vs Cross-Model Baseline 비교
-
-| 비교 유형 | Cosine Similarity | 설명 |
-|-----------|-------------------|------|
-| GLM 내부 (layer 0 vs layer 10,20,30,40) | **0.377** | 같은 모델, 다른 레이어 |
-| Solar 내부 (layer 0 vs layer 10,20,30,40) | **0.376** | 같은 모델, 다른 레이어 |
-| **Solar vs GLM (같은 레이어)** | **0.989** | 다른 모델, 같은 레이어 |
-
-### 왜 이것이 결정적인가?
+하지만 0.377이라는 숫자는 GLM[0]과 GLM[10], GLM[20], GLM[30], GLM[40] 사이에 잰 cosine similarity(0.37, 0.37, 0.37, 0.37)의 평균값으로, 이렇게 작은 값이 나오는 이유는 0번째 레이어는 다른 레이어에 비해 다른 특성을 가지고 있기 때문입니다. 실제로 0번째 레이어를 제외한 다른 레이어끼리 거리를 재면 0.99가 나옵니다.
 
 ```
-만약 "구조만 비슷한" 독립 모델이라면:
-  → Solar[10] vs GLM[10] ≈ 0.38 (baseline과 동일해야 함)
-
-실제 관측:
-  → Solar[10] vs GLM[10] = 0.989
-
-차이: 0.612 (61.2% 포인트)
-효과 크기: 182 시그마
-P-value: < 10^-1000 (사실상 0)
+       Pairwise GLM comparisons among [0,10,20,30,40]
+  GLM[0] vs GLM[10]: cos=0.375810
+  GLM[0] vs GLM[20]: cos=0.375664
+  GLM[0] vs GLM[30]: cos=0.377255
+  GLM[0] vs GLM[40]: cos=0.379035
+  GLM[10] vs GLM[20]: cos=0.998163
+  GLM[10] vs GLM[30]: cos=0.997360
+  GLM[10] vs GLM[40]: cos=0.996732
+  GLM[20] vs GLM[30]: cos=0.997556
+  GLM[20] vs GLM[40]: cos=0.996758
+  GLM[30] vs GLM[40]: cos=0.999041
 ```
 
-**해석**: LayerNorm 가중치는 학습 중 무작위로 수렴합니다. 독립적인 두 모델이라면 "같은 레이어 번호"라고 해서 더 유사할 이유가 없습니다. 하지만 Solar[10]과 GLM[10]은 0.989로 거의 동일하고, Solar[10]과 GLM[20]은 0.38입니다. 이것은 **Solar의 레이어가 GLM의 해당 레이어에서 직접 파생되었음**을 증명합니다.
-
----
+따라서 GLM[i] vs GLM[j]의 cosine similarity보다 GLM[i] vs SOLAR[i]의 cosine similarity가 월등히 크다는 것은 사실이 아니며 이는 두 모델이 유사하다는 근거가 될 수 없습니다.
 
-## 텐서 유형별 분석
+## Usage of AI Agent
 
-![Summary Comparison](results/summary_comparison.png)
+기존 [solar-vs-glm](https://github.com/sionic-ai/solar-vs-glm)의 코드와 리드미는 매우 heavy하게 LLM-generated된 것으로 보입니다. 리드미 스타일과 여러 파일이 정리되지 않고 나열되어 있는 모습 그리고 마크다운 파일도 FINAL_PROOF_REPORT.md와 README.md가 혼재되어 있는 등 Claude Code 혹은 그에 준하는 AI Agent를 이용해 작업된 것으로 보이며, 또한 전반적인 퀄리티를 보았을 때 인간의 개입은 크지 않았을 것으로 보입니다. 코드 상에도 굉장히 unusual한 구현이 많은데, 제가 Codex에게 질의한 질문과 답변을 아래에 참고하시라고 첨부하겠습니다. 굳이 제가 따로 설명을 덧붙이지 않아도 아래 답변을 읽어보는 것만으로 코드가 어떤 상태인지 바로 파악이 가능하시리라 생각합니다.
 
-| 텐서 유형 | Mean Cosine | 해석 |
-|----------|-------------|------|
-| **input_layernorm** | **0.949** | 원본 보존 |
-| **post_attention_layernorm** | **0.986** | 원본 보존 |
-| k_proj (Key projection) | 0.001 | 재학습됨 |
-| v_proj (Value projection) | 0.001 | 재학습됨 |
-| mlp.gate (MoE router) | 0.004 | 재학습됨 |
-| **embed_tokens** | **0.002** | 재학습됨 |
+AI agent 자체가 문제가 있다기보다는 인간이 AI agent의 결과물에 대해 충분히 검수하지 않고 책임지지 않는 상황이 문제로 보여집니다. 저는 오늘 저녁 디저트로 딸기를 먹으며 옆에 노트북을 펴놓고 20분동안 단 한 줄도 직접 코딩하지 않고 Codex에게 9번의 자연어 질의를 수행하여 문제점을 찾고 결론을 냈습니다. AI agent는 강력한 도구이지만, 마법의 도구가 아닙니다. 사용자는 누구든지 자신이 지시하는 작업과 그에 대한 결과물에 대한 온전한 책임을 져야 할 것입니다. [Codex와 저의 질의를 참고삼으라고 첨부하겠습니다.](./conversation_with_codex.md)
 
----
+### Q.
 
-## 임베딩 비교 (영문 토큰)
+여기서 같은 모델에서 서로 다른 레이어끼리 cosine sim 0.37 나왔다는데 관련 코드 찾아줘 어떻게 구현한건지
 
-![Embedding Comparison](results/embedding_comparison.png)
+### A.
 
-### 공통 영문 토큰 임베딩 유사도
+• AGENTS.md는 이 리포에서 찾지 못했어요. 대신 요청하신 0.37(동일 모델 다른 레이어) cosine 계산
+  코드는 definitive_proof.py에 있습니다.
 
-| 지표 | 값 |
-|------|-----|
-| 비교 토큰 수 | 200개 (영문) |
-| Mean Cosine | **0.002** |
-| Std | 0.015 |
-| cos > 0.9 | 0% |
-| cos < 0.1 | **100%** |
-| Baseline (GLM 내부 랜덤 쌍) | 0.009 |
+  같은 모델 레이어 간 cosine(≈0.377) 계산 위치:
 
-### 해석
+  - definitive_proof.py:176부터 “Within-model baseline” 섹션에서 GLM 레이어 0 vs 10/20/30/40의
+  input_layernorm.weight를 가져와 cosine을 계산합니다.
+  - 동일한 출력 포맷이 README.md에 그대로 정리돼 있습니다 (README.md:190).
 
-**임베딩 유사도 ~0은 파생 가설과 일치합니다:**
+  핵심 구현 흐름 요약:
 
-```
-예상 시나리오:
-  GLM 토크나이저 (151K) + 45K 새 토큰 = Solar 토크나이저 (196K)
-                ↓
-  임베딩 레이어 전체 재학습 필요 (새 토큰 추가 + 분포 변화)
-                ↓
-  결과: 임베딩 cos ≈ 0 (재학습됨)
-```
+  - 레이어별 input_layernorm.weight를 HF safetensors에서 raw bytes로 가져옴 (fetch_raw_bytes)
+  - bf16 raw를 fp32로 디코딩 (decode_bf16)
+  - flatten 후 cosine 계산 (cosine)
+  - 레이어 0 vs 10/20/30/40 반복
 
-**핵심 통찰**:
-- LayerNorm: cos ~0.99 (보존)
-- Embedding: cos ~0 (재학습)
+  관련 코드 (요약, 동일 로직):
 
-이 **선택적 보존 패턴**이 파생의 결정적 증거입니다.
-독립 모델이라면 **모든** 가중치가 ~0이어야 합니다.
+  # definitive_proof.py:176
+  for layer_j in [10, 20, 30, 40]:
+      key_i = "model.layers.0.input_layernorm.weight"
+      key_j = f"model.layers.{layer_j}.input_layernorm.weight"
 
-### 레이어별 LayerNorm 유사도
+      raw_i = fetch_raw_bytes(...)
+      raw_j = fetch_raw_bytes(...)
 
-![LayerNorm by Layer](results/layernorm_by_layer.png)
+      arr_i = decode_bf16(raw_i)
+      arr_j = decode_bf16(raw_j)
 
-**패턴 분석**:
-- Layer 0: 0.127 (토크나이저 확장 영향)
-- Layer 5+: 0.95+ (원본 보존)
-- Layer 40+: 0.99+ (거의 동일)
+      cos = cosine(arr_i, arr_j)
+      print(f"  GLM[0] vs GLM[{layer_j}]: cos={cos:.6f}")
 
----
+  cosine 함수 정의:
 
-## 아키텍처 비교
+  - definitive_proof.py:76
 
-| 파라미터 | GLM-4.5-Air | Solar-Open-100B | 변화 |
-|---------|-------------|-----------------|------|
-| `hidden_size` | 4096 | 4096 | **동일** |
-| `num_hidden_layers` | 46 | 48 | +2 |
-| `num_attention_heads` | 96 | 64 | -32 |
-| `num_key_value_heads` | 8 | 8 | **동일** |
-| `n_routed_experts` | 128 | 128 | **동일** |
-| `num_experts_per_tok` | 8 | 8 | **동일** |
-| `n_shared_experts` | 1 | 1 | **동일** |
-| `vocab_size` | 151,552 | 196,608 | +45,056 |
-| `rope_theta` | 1,000,000 | 1,000,000 | **동일** |
-| `max_position_embeddings` | 131,072 | 131,072 | **동일** |
-| `num_nextn_predict_layers` | 1 | None | 제거 |
+  원하시면 이 계산이 어디서 호출되는지(실행 진입점)나, 다른 스크립트에서 동일 결과를 재현하는
+  경로도 정리해 드릴게요.
 
----
-
-## 추정 변환 과정
 
-```
-GLM-4.5-Air (원본)
-    │
-    ├─ LayerNorm 가중치 보존 (cos ≈ 0.99)
-    ├─ Attention 재학습 (head 수 96→64 변경)
-    ├─ MoE router 재학습
-    ├─ 토크나이저 확장 (+45K 토큰)
-    ├─ 2개 레이어 추가 (46→48)
-    ├─ MTP 레이어 제거
-    │
-    ▼
-Solar-Open-100B (파생)
-```
+## How to Reproduce my result
 
----
-
-## 재현 방법
-
-### 환경 설정
-
-```bash
-cd /home/sionic/compare-probe-solar
-
-# 가상환경 생성 (uv 사용)
-uv venv
-source .venv/bin/activate
-
-# 의존성 설치
-uv pip install huggingface_hub requests numpy matplotlib scipy
-```
-
-### 스크립트 실행
-
-#### 1. 기본 분석 (LayerNorm 레이어별 비교)
-
-```bash
-HF_HOME=/mnt/nas/sangho/hf_cache python probe_solar_vs_glm45_air.py \
-    --outdir out_solar_vs_glm45
-```
-
-출력:
-- `00_config_compare.json` - 아키텍처 비교
-- `01_tokenizer_compare.json` - 토크나이저 분석
-- `layerwise_similarity.csv` - 레이어별 유사도
-- `plot_cosine_by_layer.png` - Cosine 그래프
-- `plot_pearson_by_layer.png` - Pearson 그래프
-
-#### 2. 상세 가중치 샘플링 (Attention, MoE 포함)
-
-```bash
-HF_HOME=/mnt/nas/sangho/hf_cache python probe_solar_glm45air_v2.py \
-    --solar upstage/Solar-Open-100B \
-    --glm zai-org/GLM-4.5-Air \
-    --layers 0-45 \
-    --out results/solar_vs_glm_detailed.csv
-```
-
-#### 3. 결정적 증거 분석 (Within-model baseline)
-
-```bash
-HF_HOME=/mnt/nas/sangho/hf_cache python definitive_proof.py
-```
-
----
-
-## 통계적 분석 상세
-
-### Within-Model Baseline 측정
-
-```python
-# GLM 내부: layer 0 vs layer 10,20,30,40
-GLM[0] vs GLM[10]: cos=0.375810
-GLM[0] vs GLM[20]: cos=0.375664
-GLM[0] vs GLM[30]: cos=0.377255
-GLM[0] vs GLM[40]: cos=0.379035
-평균: 0.377
-
-# Solar 내부: layer 0 vs layer 10,20,30,40
-Solar[0] vs Solar[10]: cos=0.373059
-Solar[0] vs Solar[20]: cos=0.377298
-Solar[0] vs Solar[30]: cos=0.377100
-Solar[0] vs Solar[40]: cos=0.376059
-평균: 0.376
-
-# Cross-model: Solar vs GLM 같은 레이어
-Solar[10] vs GLM[10]: cos=0.981094
-Solar[20] vs GLM[20]: cos=0.991792
-Solar[30] vs GLM[30]: cos=0.991429
-Solar[40] vs GLM[40]: cos=0.991635
-평균: 0.989
-```
-
-### 통계적 유의성
-
-```
-Within-model baseline: 0.377 ± 0.001
-Cross-model (Solar-GLM): 0.989 ± 0.005
-
-차이: 0.612
-효과 크기: 182 시그마
-P-value: < 10^-1000
-```
-
----
-
-## 비판적 검토
-
-### 고려한 대안 가설
-
-| 가설 | 검증 | 결과 |
-|------|------|------|
-| "우연히 비슷" | 182 시그마 효과 크기 | **기각** |
-| "같은 초기화" | Attention/MoE는 ~0 | **기각** |
-| "비슷한 아키텍처" | Within-model baseline 0.38 | **기각** |
-| "GLM→Solar 파생" | 모든 증거와 일치 | **채택** |
-
-### Raw Bytes 비교
-
-- 완전히 동일한 텐서: **0개**
-- 해석: 단순 복사가 아닌 **변형 후 재학습**
-
----
-
-## 최종 판정
-
-### 증거 요약
-
-| 테스트 | 결과 | 강도 |
-|--------|------|------|
-| Within-model vs Cross-model | 0.612 차이 (182σ) | ⭐⭐⭐⭐⭐ **결정적** |
-| LayerNorm 평균 cosine | 0.968 | ⭐⭐⭐⭐⭐ |
-| Attention cosine ~0 | 재학습 확인 | ⭐⭐⭐⭐ |
-| 아키텍처 유사성 | MoE 구조 동일 | ⭐⭐⭐⭐ |
-
-### 결론
-
-**Solar-Open-100B는 GLM-4.5-Air를 base model로 사용하여:**
-- LayerNorm 가중치: **보존** (cos ~0.99)
-- Embedding: **재학습** (cos ~0, 토크나이저 확장 때문)
-- Attention: **재학습** (cos ~0, head 수 변경)
-- MoE Router: **재학습** (cos ~0)
-
-**이 "선택적 보존" 패턴은 파생의 결정적 증거입니다.**
-
----
-
-## 파일 구조
-
-```
-compare-probe-solar/
-├── README.md                         # 이 파일 (최종 보고서)
-├── definitive_proof.py               # 결정적 증거 분석 (Within-model baseline)
-├── embedding_comparison.py           # 임베딩 유사도 분석 ⭐
-├── probe_solar_vs_glm45_air.py       # LayerNorm 분석 스크립트
-├── probe_solar_glm45air.py           # 기본 가중치 비교
-├── probe_solar_glm45air_v2.py        # 상세 가중치 샘플링 + 시각화
-├── probe_layer_decay.py              # 레이어 decay 패턴
-├── out_solar_vs_glm45/               # 기본 분석 결과
-├── out_decay/                        # Decay 분석 결과
-└── results/
-    ├── definitive_evidence.png       # 결정적 증거 그래프 ⭐
-    ├── embedding_comparison.png      # 임베딩 유사도 그래프 ⭐
-    ├── layernorm_by_layer.png        # LayerNorm 레이어별
-    ├── summary_comparison.png        # 텐서 유형별 요약
-    ├── embedding_comparison.json     # 임베딩 분석 상세 결과
-    └── solar_vs_glm_detailed.csv     # 상세 데이터
-```
-
----
-
-## 라이선스
-
-이 분석 코드는 연구 목적으로 제공됩니다.
-
----
-
-*분석 일자: 2026-01-01*
-*방법론: Within-model baseline comparison + HTTP Range request sampling*
+just run `python3 definitive_proof.py`

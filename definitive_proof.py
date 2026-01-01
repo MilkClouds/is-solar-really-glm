@@ -69,9 +69,16 @@ def fetch_raw_bytes(url: str, header: Dict, key: str, token: Optional[str]) -> b
     end = 8 + header["__header_len__"] + int(off1) - 1
     return http_range_get(url, begin, end, token)
 
-def decode_bf16(raw: bytes) -> np.ndarray:
-    u16 = np.frombuffer(raw, dtype=np.uint16)
-    return (u16.astype(np.uint32) << 16).view(np.float32)
+def decode_tensor(raw: bytes, dtype: str) -> np.ndarray:
+    dtype = dtype.upper()
+    if dtype in ("BF16", "BFLOAT16"):
+        u16 = np.frombuffer(raw, dtype=np.uint16)
+        return (u16.astype(np.uint32) << 16).view(np.float32)
+    if dtype in ("F16", "FLOAT16"):
+        return np.frombuffer(raw, dtype=np.float16).astype(np.float32)
+    if dtype in ("F32", "FLOAT32"):
+        return np.frombuffer(raw, dtype=np.float32)
+    raise ValueError(f"Unsupported dtype: {dtype}")
 
 def cosine(a: np.ndarray, b: np.ndarray) -> float:
     a, b = a.flatten().astype(np.float64), b.flatten().astype(np.float64)
@@ -79,6 +86,9 @@ def cosine(a: np.ndarray, b: np.ndarray) -> float:
     if na == 0 or nb == 0:
         return float("nan")
     return float(np.dot(a, b) / (na * nb))
+
+def centered_cosine(a: np.ndarray, b: np.ndarray, center: float = 1.0) -> float:
+    return cosine(a - center, b - center)
 
 def load_index(repo: str, rev: str, token: Optional[str]) -> Dict[str, str]:
     path = hf_hub_download(repo, "model.safetensors.index.json", revision=rev, token=token)
@@ -157,8 +167,8 @@ def main():
                 print(f"  [MATCH!] {key}")
             else:
                 # Even if hash differs, check cosine
-                solar_arr = decode_bf16(solar_raw)
-                glm_arr = decode_bf16(glm_raw)
+                solar_arr = decode_tensor(solar_raw, solar_hdr[key]["dtype"])
+                glm_arr = decode_tensor(glm_raw, glm_hdr[key]["dtype"])
                 cos = cosine(solar_arr, glm_arr)
                 if cos > 0.99:
                     print(f"  [HIGH]   {key} cos={cos:.6f}")
@@ -180,10 +190,13 @@ def main():
     print("       Comparing GLM layer i vs GLM layer j (within-model baseline)")
 
     within_model_cosines = []
+    within_model_centered = []
     cross_model_cosines = []
+    cross_model_centered = []
 
     # Within GLM: Compare layer 0 vs other layers
-    for layer_j in [10, 20, 30, 40]:
+    base_layers = [0, 10, 20, 30, 40]
+    for layer_j in base_layers[1:]:
         key_i = "model.layers.0.input_layernorm.weight"
         key_j = f"model.layers.{layer_j}.input_layernorm.weight"
 
@@ -197,14 +210,62 @@ def main():
             raw_i = fetch_raw_bytes(glm_hdr_i["__url__"], glm_hdr_i, key_i, token)
             raw_j = fetch_raw_bytes(glm_hdr_j["__url__"], glm_hdr_j, key_j, token)
 
-            arr_i = decode_bf16(raw_i)
-            arr_j = decode_bf16(raw_j)
+            dtype_i = glm_hdr_i[key_i]["dtype"]
+            dtype_j = glm_hdr_j[key_j]["dtype"]
+            arr_i = decode_tensor(raw_i, dtype_i)
+            arr_j = decode_tensor(raw_j, dtype_j)
 
             cos = cosine(arr_i, arr_j)
             within_model_cosines.append(cos)
+            within_model_centered.append(centered_cosine(arr_i, arr_j))
             print(f"  GLM[0] vs GLM[{layer_j}]: cos={cos:.6f}")
         except Exception as e:
             eprint(f"  [skip] {e}")
+
+    # Pairwise within GLM among selected layers (5C2)
+    print("       Pairwise GLM comparisons among [0,10,20,30,40]")
+    for idx_i in range(len(base_layers)):
+        for idx_j in range(idx_i + 1, len(base_layers)):
+            layer_i = base_layers[idx_i]
+            layer_j = base_layers[idx_j]
+            key_i = f"model.layers.{layer_i}.input_layernorm.weight"
+            key_j = f"model.layers.{layer_j}.input_layernorm.weight"
+            try:
+                glm_hdr_i = get_header(GLM, glm_wm[key_i])
+                glm_hdr_j = get_header(GLM, glm_wm[key_j])
+                raw_i = fetch_raw_bytes(glm_hdr_i["__url__"], glm_hdr_i, key_i, token)
+                raw_j = fetch_raw_bytes(glm_hdr_j["__url__"], glm_hdr_j, key_j, token)
+                arr_i = decode_tensor(raw_i, glm_hdr_i[key_i]["dtype"])
+                arr_j = decode_tensor(raw_j, glm_hdr_j[key_j]["dtype"])
+                cos = cosine(arr_i, arr_j)
+                print(f"  GLM[{layer_i}] vs GLM[{layer_j}]: cos={cos:.6f}")
+            except Exception as e:
+                eprint(f"  [skip] {e}")
+
+    # Random within-model baseline across layers (less biased than fixed layer 0)
+    rng = np.random.default_rng(0)
+    rand_pairs = set()
+    while len(rand_pairs) < 100:
+        i, j = int(rng.integers(0, 46)), int(rng.integers(0, 46))
+        if i != j:
+            rand_pairs.add((i, j))
+
+    rand_cos = []
+    rand_centered = []
+    for i, j in sorted(rand_pairs):
+        key_i = f"model.layers.{i}.input_layernorm.weight"
+        key_j = f"model.layers.{j}.input_layernorm.weight"
+        try:
+            hdr_i = get_header(GLM, glm_wm[key_i])
+            hdr_j = get_header(GLM, glm_wm[key_j])
+            raw_i = fetch_raw_bytes(hdr_i["__url__"], hdr_i, key_i, token)
+            raw_j = fetch_raw_bytes(hdr_j["__url__"], hdr_j, key_j, token)
+            arr_i = decode_tensor(raw_i, hdr_i[key_i]["dtype"])
+            arr_j = decode_tensor(raw_j, hdr_j[key_j]["dtype"])
+            rand_cos.append(cosine(arr_i, arr_j))
+            rand_centered.append(centered_cosine(arr_i, arr_j))
+        except Exception:
+            pass
 
     # Cross-model: Solar layer i vs GLM layer i
     for layer in [0, 10, 20, 30, 40]:
@@ -220,12 +281,14 @@ def main():
             solar_raw = fetch_raw_bytes(solar_hdr["__url__"], solar_hdr, key, token)
             glm_raw = fetch_raw_bytes(glm_hdr["__url__"], glm_hdr, key, token)
 
-            solar_arr = decode_bf16(solar_raw)
-            glm_arr = decode_bf16(glm_raw)
+            solar_arr = decode_tensor(solar_raw, solar_hdr[key]["dtype"])
+            glm_arr = decode_tensor(glm_raw, glm_hdr[key]["dtype"])
 
             cos = cosine(solar_arr, glm_arr)
+            ccos = centered_cosine(solar_arr, glm_arr)
             cross_model_cosines.append(cos)
-            print(f"  Solar[{layer}] vs GLM[{layer}]: cos={cos:.6f}")
+            cross_model_centered.append(ccos)
+            print(f"  Solar[{layer}] vs GLM[{layer}]: cos={cos:.6f}, centered={ccos:.6f}")
         except Exception as e:
             eprint(f"  [skip] {e}")
 
@@ -233,7 +296,13 @@ def main():
         within_mean = np.mean(within_model_cosines)
         cross_mean = np.mean(cross_model_cosines)
         print(f"\n  WITHIN-MODEL baseline: {within_mean:.4f}")
+        print(f"  WITHIN-MODEL centered: {np.mean(within_model_centered):.4f}")
+        if rand_cos:
+            print(f"  WITHIN-MODEL random mean: {np.mean(rand_cos):.4f} ± {np.std(rand_cos):.4f}")
+            print(f"  WITHIN-MODEL random centered mean: {np.mean(rand_centered):.4f} ± {np.std(rand_centered):.4f}")
         print(f"  CROSS-MODEL (Solar-GLM): {cross_mean:.4f}")
+        if cross_model_centered:
+            print(f"  CROSS-MODEL centered: {np.mean(cross_model_centered):.4f}")
         print(f"  DIFFERENCE: {cross_mean - within_mean:.4f}")
 
         if cross_mean > within_mean + 0.1:
@@ -268,8 +337,8 @@ def main():
                 exact_match = (solar_raw == glm_raw)
 
                 # Compute cosine
-                solar_arr = decode_bf16(solar_raw)
-                glm_arr = decode_bf16(glm_raw)
+                solar_arr = decode_tensor(solar_raw, solar_hdr[key]["dtype"])
+                glm_arr = decode_tensor(glm_raw, glm_hdr[key]["dtype"])
                 cos = cosine(solar_arr, glm_arr)
 
                 results.append({
@@ -323,8 +392,8 @@ def main():
                 solar_raw = fetch_raw_bytes(solar_hdr["__url__"], solar_hdr, key, token)
                 glm_raw = fetch_raw_bytes(glm_hdr["__url__"], glm_hdr, key, token)
 
-                solar_arr = decode_bf16(solar_raw)
-                glm_arr = decode_bf16(glm_raw)
+                solar_arr = decode_tensor(solar_raw, solar_hdr[key]["dtype"])
+                glm_arr = decode_tensor(glm_raw, glm_hdr[key]["dtype"])
 
                 cos = cosine(solar_arr, glm_arr)
                 attn_cosines.append(cos)
